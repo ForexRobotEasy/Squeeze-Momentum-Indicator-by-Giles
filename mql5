@@ -1,0 +1,154 @@
+mql5
+//+------------------------------------------------------------------+
+//|                                         Squeeze Momentum Indicator|
+//|                                      Developed by Forex Robot Easy Team|
+//|                                      https://www.forexroboteasy.com|
+//+------------------------------------------------------------------+
+
+#property copyright 'Forex Robot Easy Team'
+#property link      'https://www.forexroboteasy.com'
+
+//+------------------------------------------------------------------+
+//| Custom Indicator input parameters                                  |
+//+------------------------------------------------------------------+
+input int Period = 20;
+input double Deviation = 2.0;
+input int Smooth = 20;
+input int MomentumPeriod = 10;
+
+//+------------------------------------------------------------------+
+//| Custom Indicator buffers                                          |
+//+------------------------------------------------------------------+
+double ExtSqueezeBuffer[];
+double ExtMomentumBuffer[];
+double ExtSqueezeReleaseBuffer[];
+
+//+------------------------------------------------------------------+
+//| Custom Indicator initialization function                         |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    // Indicator buffers mapping
+    SetIndexBuffer(0, ExtSqueezeBuffer);
+    SetIndexBuffer(1, ExtMomentumBuffer);
+    SetIndexBuffer(2, ExtSqueezeReleaseBuffer);
+
+    // Set indicator line color
+    SetIndexStyle(0, DRAW_NONE);
+    SetIndexStyle(1, DRAW_LINE);
+    SetIndexStyle(2, DRAW_ARROW);
+
+    return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//| Custom Indicator deinitialization function                       |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+    // Remove indicator buffers
+    ArrayResize(ExtSqueezeBuffer, 0);
+    ArrayResize(ExtMomentumBuffer, 0);
+    ArrayResize(ExtSqueezeReleaseBuffer, 0);
+}
+
+//+------------------------------------------------------------------+
+//| Custom Indicator calculation function                            |
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[])
+{
+    int i, limit;
+
+    if (prev_calculated == 0)
+    {
+        limit = rates_total - Period - Smooth - MomentumPeriod + 2;
+        for(i = 0; i < limit; i++)
+        {
+            ExtSqueezeBuffer[i] = 0.0;
+            ExtMomentumBuffer[i] = 0.0;
+            ExtSqueezeReleaseBuffer[i] = 0.0;
+        }
+    }
+    else
+        limit = rates_total - prev_calculated;
+
+    for(i = 0; i < limit; i++)
+    {
+        // Calculate squeeze period
+        bool squeezePeriod = CalculateSqueezePeriod(i, open, high, low, close);
+
+        // Calculate squeeze release
+        bool squeezeRelease = CalculateSqueezeRelease(i, squeezePeriod);
+
+        // Calculate momentum direction
+        double momentum = CalculateMomentumDirection(i, squeezeRelease, close);
+
+        // Set indicator buffers
+        ExtSqueezeBuffer[i] = squeezePeriod ? close[i] : 0.0;
+        ExtMomentumBuffer[i] = squeezeRelease ? momentum : 0.0;
+        ExtSqueezeReleaseBuffer[i] = squeezeRelease ? close[i] : 0.0;
+    }
+
+    // Return value of prev_calculated for next call
+    return(rates_total);
+}
+
+//+------------------------------------------------------------------+
+//| Calculate squeeze period                                          |
+//+------------------------------------------------------------------+
+bool CalculateSqueezePeriod(const int index, const double &open[], const double &high[], const double &low[], const double &close[])
+{
+    bool squeezePeriod = true;
+
+    // Calculate Bollinger Bands
+    double ma = iMA(NULL, 0, Period, 0, MODE_SMA, PRICE_CLOSE, index);
+    double deviation = Deviation * iStdDev(NULL, 0, Period, 0, MODE_SMA, PRICE_CLOSE, index);
+    double upperBand = ma + deviation;
+    double lowerBand = ma - deviation;
+
+    // Calculate Keltner Channel
+    double midLine = iMA(NULL, 0, Period, 0, MODE_SMA, PRICE_TYPICAL, index);
+    double atr = iATR(NULL, 0, Period, index);
+    double upperChannel = midLine + Smooth * atr;
+    double lowerChannel = midLine - Smooth * atr;
+
+    // Check if Bollinger Bands are within Keltner Channel
+    if (close[index] > upperChannel || close[index] < lowerChannel)
+        squeezePeriod = false;
+
+    return squeezePeriod;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate squeeze release                                         |
+//+------------------------------------------------------------------+
+bool CalculateSqueezeRelease(const int index, const bool squeezePeriod)
+{
+    bool squeezeRelease = false;
+
+    // Check if squeeze period is followed by a blue dot
+    if (squeezePeriod && ExtSqueezeBuffer[index + 1] > 0.0)
+        squeezeRelease = true;
+
+    return squeezeRelease;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate momentum direction                                      |
+//+------------------------------------------------------------------+
+double CalculateMomentumDirection(const int index, const bool squeezeRelease, const double &close[])
+{
+    double momentum = 0.0;
+
+    // Calculate momentum direction
+    if (squeezeRelease)
+    {
+        double momentumSum = 0.0;
+        for (int i = index - MomentumPeriod + 1; i <= index; i++)
+            momentumSum += close[i] - close[i - 1];
+
+        momentum = momentumSum / MomentumPeriod;
+    }
+
+    return momentum;
+}
